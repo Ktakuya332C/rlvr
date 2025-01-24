@@ -1,3 +1,4 @@
+import os
 import ray
 import time
 import torch
@@ -5,6 +6,10 @@ from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from rlvr.dist import TorchDistActor
+
+
+os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"
+os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
 
 
 def test_getaddr():
