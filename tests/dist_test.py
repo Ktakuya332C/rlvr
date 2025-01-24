@@ -34,13 +34,10 @@ def test_global_group():
     for rank in range(2):
         actor = ray.remote(SampleActor).options(scheduling_strategy=st).remote()
         if rank == 0:
-            master_host = "localhost"
+            master_host = "127.0.0.1"
             _, master_port = ray.get(actor.get_addr.remote())
         actor.init_process_group.remote(master_host, master_port, 2, rank)
         actors.append(actor)
-
-    # wait for the init_process_group to end without using ray's functionalities
-    time.sleep(1.0)
 
     assert ray.get(actors[0].get_rank.remote()) == 0
     assert ray.get(actors[1].get_rank.remote()) == 1
@@ -64,7 +61,7 @@ def test_local_group():
     for rank in range(4):
         actor = ray.remote(SampleActor).options(scheduling_strategy=st).remote()
         if rank == 0:
-            master_host = "localhost"
+            master_host = "127.0.0.1"
             _, master_port = ray.get(actor.get_addr.remote())
         actor.init_process_group.remote(master_host, master_port, 4, rank)
         actors.append(actor)
