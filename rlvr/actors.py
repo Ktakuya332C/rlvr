@@ -132,12 +132,7 @@ class LastIntScorer:
         assert len(responses) == len(answers)
         scores = np.zeros(len(responses))
         for idx, (response, answer) in enumerate(zip(responses, answers)):
-            maybe_last_int = _extract_last_int(response)
-            if maybe_last_int != "" and maybe_last_int == answer:
+            m = re.findall(r"\d+", response)
+            if m and m[-1] != "" and m[-1] == answer:
                 scores[idx] = 1.0
         return scores
-
-
-def _extract_last_int(text):
-    m = re.findall(r"\d+", text)
-    return m[-1] if m else ""
