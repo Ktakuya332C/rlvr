@@ -25,14 +25,16 @@ def main():
             texts=batch["question"],
             apply_chat_template=False,
         )
-        output_ids_ref, output_mask_ref = rollout_dispatcher.process.remote(
-            input_ids=input_ids_ref,
-            attention_mask=attention_mask_ref,
-            batch_size=2,
-            max_length=512,
+        input_outputs_ref, input_output_mask_ref, output_mask_ref = (
+            rollout_dispatcher.process.remote(
+                input_ids=input_ids_ref,
+                attention_mask=attention_mask_ref,
+                batch_size=2,
+                max_length=512,
+            )
         )
         output_texts_ref = detokenizer.process.remote(
-            tokens=output_ids_ref,
+            tokens=input_outputs_ref,
             attention_mask=output_mask_ref,
         )
         scores_ref = scorer.process.remote(

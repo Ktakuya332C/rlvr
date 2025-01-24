@@ -41,19 +41,28 @@ def test_rollout_worker():
     actor = actors.RolloutWorker.remote("sbintuitions/tiny-lm")
     input_ids = np.array([[3, 489, 310, 287, 8926]])
     attention_mask = np.array([[0, 1, 1, 1, 1]])
-    outputs, output_mask = ray.get(actor.process.remote(input_ids, attention_mask, 6))
-    np.testing.assert_equal(outputs, np.array([[3, 489, 310, 287, 8926, 5477]]))
+    input_outputs, input_output_mask, output_mask = ray.get(
+        actor.process.remote(input_ids, attention_mask, 6)
+    )
+    np.testing.assert_equal(input_outputs, np.array([[3, 489, 310, 287, 8926, 5477]]))
+    np.testing.assert_equal(input_output_mask, np.array([[0, 1, 1, 1, 1, 1]]))
     np.testing.assert_equal(output_mask, np.array([[0, 0, 0, 0, 0, 1]]))
 
 
 def test_rollout_postprocess():
-    outputs = np.array(
+    input_outputs = np.array(
         [
             [2, 10, 3, 11, 12, 3, 13, 3, 14],  # <pad> p <eos> p r <eos> r <eos> r
             [10, 3, 11, 12, 13, 14, 3, 15, 16],  # p <eos> p p r r <eos> r r
         ]
     )
     input_mask = np.array([[0, 1, 1, 1], [1, 1, 1, 1]])
+    expected_input_output_mask = np.array(
+        [
+            [0, 1, 1, 1, 1, 1, 0, 0, 0],
+            [1, 1, 1, 1, 1, 1, 1, 0, 0],
+        ]
+    )
     expected_output_mask = np.array(
         [
             [0, 0, 0, 0, 1, 1, 0, 0, 0],
@@ -61,7 +70,10 @@ def test_rollout_postprocess():
         ]
     )
     eos_token_id = 3
-    output_mask = actors._rollout_postprocess(outputs, input_mask, eos_token_id)
+    input_output_mask, output_mask = actors._rollout_postprocess(
+        input_outputs, input_mask, eos_token_id
+    )
+    np.testing.assert_equal(input_output_mask, expected_input_output_mask)
     np.testing.assert_equal(output_mask, expected_output_mask)
 
 
@@ -72,8 +84,9 @@ def test_rollout_dispatcher():
     input_ids = np.array([[489, 310], [3252, 310]])
     attention_mask = np.ones((2, 2), dtype=np.int64)
     ref = actor3.process.remote(input_ids, attention_mask, batch_size=1, max_length=3)
-    outputs, output_mask = ray.get(ref)
-    assert outputs.shape == (2, 3)
+    input_outputs, input_output_mask, output_mask = ray.get(ref)
+    assert input_outputs.shape == (2, 3)
+    assert input_output_mask.shape == (2, 3)
     assert output_mask.shape == (2, 3)
 
 
