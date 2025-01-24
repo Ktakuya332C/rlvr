@@ -1,3 +1,4 @@
+import re
 import ray
 import torch
 import warnings
@@ -114,3 +115,21 @@ class RolloutDispatcher:
             outputs_list.append(outputs)
             output_mask_list.append(output_mask)
         return np.concatenate(outputs_list), np.concatenate(output_mask_list)
+
+
+@ray.remote
+class LastIntScorer:
+
+    def process(self, responses, answers):
+        assert len(responses) == len(answers)
+        scores = np.zeros(len(responses))
+        for idx, (response, answer) in enumerate(zip(responses, answers)):
+            maybe_last_int = _extract_last_int(response)
+            if maybe_last_int != "" and maybe_last_int == answer:
+                scores[idx] = 1.0
+        return scores
+
+
+def _extract_last_int(text):
+    m = re.findall(r"\d+", text)
+    return m[-1] if m else ""

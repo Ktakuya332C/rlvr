@@ -75,3 +75,13 @@ def test_rollout_dispatcher():
     outputs, output_mask = ray.get(ref)
     assert outputs.shape == (2, 3)
     assert output_mask.shape == (2, 3)
+
+
+def test_last_int_scorer():
+    actor = actors.LastIntScorer.remote()
+    responses = np.array(
+        ["This is 42", "A: 2", "That is a pen", "The answer is \\boxed{3}"]
+    )
+    answers = np.array(["42", "1", "3", "3"])
+    scores = ray.get(actor.process.remote(responses, answers))
+    np.testing.assert_equal(scores, np.array([1.0, 0.0, 0.0, 1.0]))
