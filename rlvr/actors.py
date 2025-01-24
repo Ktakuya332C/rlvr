@@ -57,7 +57,7 @@ class RolloutWorker(TorchDistActor):
         attention_mask,
         max_length,
         do_sample=False,
-        temperature=0.0,
+        temperature=1.0,
         num_return_sequences=1,
     ):
         self._model.generation_config.eos_token_id = None
