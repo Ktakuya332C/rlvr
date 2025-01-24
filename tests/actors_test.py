@@ -42,7 +42,6 @@ def test_rollout_worker():
     input_ids = np.array([[3, 489, 310, 287, 8926]])
     attention_mask = np.array([[0, 1, 1, 1, 1]])
     outputs, output_mask = ray.get(actor.process.remote(input_ids, attention_mask, 6))
-    print(outputs, output_mask)
     np.testing.assert_equal(outputs, np.array([[3, 489, 310, 287, 8926, 5477]]))
     np.testing.assert_equal(output_mask, np.array([[0, 0, 0, 0, 0, 1]]))
 

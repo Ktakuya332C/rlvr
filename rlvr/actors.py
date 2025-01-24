@@ -50,7 +50,15 @@ class RolloutWorker(TorchDistActor):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
 
     @ray.method(num_returns=2)
-    def process(self, input_ids, attention_mask, max_length):
+    def process(
+        self,
+        input_ids,
+        attention_mask,
+        max_length,
+        do_sample=False,
+        temperature=0.0,
+        num_return_sequences=1,
+    ):
         self._model.generation_config.eos_token_id = None
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
@@ -60,6 +68,9 @@ class RolloutWorker(TorchDistActor):
             input_ids=input_ids_torch,
             attention_mask=attention_mask_torch,
             max_length=max_length,
+            do_sample=do_sample,
+            temperature=temperature,
+            num_return_sequences=num_return_sequences,
         )
         output_mask = _rollout_postprocess(
             outputs=outputs.numpy(),

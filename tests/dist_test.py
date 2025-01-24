@@ -1,4 +1,5 @@
 import ray
+import time
 import torch
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
@@ -32,6 +33,9 @@ def test_global_group():
             _, master_port = ray.get(actor.get_addr.remote())
         actor.init_process_group.remote(master_host, master_port, 2, rank)
         actors.append(actor)
+
+    # wait for the init_process_group to end without using ray's functionalities
+    time.sleep(1.0)
 
     assert ray.get(actors[0].get_rank.remote()) == 0
     assert ray.get(actors[1].get_rank.remote()) == 1
