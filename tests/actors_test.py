@@ -4,6 +4,13 @@ import numpy as np
 from rlvr import actors
 
 
+def test_replicator():
+    actor = actors.Replicator.remote()
+    inpt = np.array([[1, 2], [3, 4]])
+    output = ray.get(actor.process.remote(inpt, 2))
+    np.testing.assert_equal(output, np.array([[1, 2], [1, 2], [3, 4], [3, 4]]))
+
+
 def test_tokenize():
     actor = actors.Tokenizer.remote("sbintuitions/tiny-lm-chat")
 

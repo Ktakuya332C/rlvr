@@ -11,6 +11,13 @@ from rlvr.dist import TorchDistActor
 
 
 @ray.remote
+class Replicator:
+
+    def process(self, arr, num_replica):
+        return arr.repeat(num_replica, axis=0)
+
+
+@ray.remote
 class Tokenizer:
 
     def __init__(self, tokenizer_path, padding_side="left"):
@@ -189,3 +196,20 @@ class ReferenceDispatcher:
         for ref_probs in self._pool.map(fn, args):
             ref_probs_list.append(ref_probs)
         return np.concatenate(ref_probs_list)
+
+
+@ray.remote
+class PolicyWorker(TorchDistActor):
+
+    def __init__(self, model_path):
+        self._model = AutoModelForCausalLM.from_pretrained(model_path)
+
+    def process(
+        self,
+        input_output_ids,
+        input_output_mask,
+        output_mask,
+        ref_probs,
+        scores,
+    ):
+        pass

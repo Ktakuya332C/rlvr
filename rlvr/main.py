@@ -2,6 +2,7 @@ import ray
 from rlvr.loaders import get_gsm8k
 from rlvr.actors import (
     Tokenizer,
+    Replicator,
     DeTokenizer,
     RolloutWorker,
     RolloutDispatcher,
@@ -15,6 +16,7 @@ def main():
     ray.init()
 
     tokenizer = Tokenizer.remote("sbintuitions/tiny-lm")
+    replicator = Replicator.remote()
     rollout_dispatcher = RolloutDispatcher.remote(
         [RolloutWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
     )
@@ -26,8 +28,10 @@ def main():
 
     dataloader = get_gsm8k()
     for batch in dataloader.iter_batches(batch_size=6):
+        repl_question_ref = replicator.process.remote(batch["question"], 2)
+        repl_answers_ref = replicator.process.remote(batch["answer"], 2)
         input_ids_ref, attention_mask_ref = tokenizer.process.remote(
-            texts=batch["question"],
+            texts=repl_question_ref,
             apply_chat_template=False,
         )
         input_outputs_ref, input_output_mask_ref, output_mask_ref = (
@@ -44,7 +48,7 @@ def main():
         )
         scores_ref = scorer.process.remote(
             responses=output_texts_ref,
-            answers=batch["answer"],
+            answers=repl_answers_ref,
         )
         ref_probs_ref = reference_dispatcher.process.remote(
             input_output_ids=input_outputs_ref,
