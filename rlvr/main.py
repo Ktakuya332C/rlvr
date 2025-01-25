@@ -6,6 +6,8 @@ from rlvr.actors import (
     RolloutWorker,
     RolloutDispatcher,
     LastIntScorer,
+    ReferenceWorker,
+    ReferenceDispatcher,
 )
 
 
@@ -18,6 +20,9 @@ def main():
     )
     detokenizer = DeTokenizer.remote("sbintuitions/tiny-lm")
     scorer = LastIntScorer.remote()
+    reference_dispatcher = ReferenceDispatcher.remote(
+        [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
+    )
 
     dataloader = get_gsm8k()
     for batch in dataloader.iter_batches(batch_size=6):
@@ -41,7 +46,12 @@ def main():
             responses=output_texts_ref,
             answers=batch["answer"],
         )
-    print(ray.get(scores_ref))
+        ref_probs_ref = reference_dispatcher.process.remote(
+            input_output_ids=input_outputs_ref,
+            input_output_mask=input_output_mask_ref,
+            batch_size=2,
+        )
+    print(ray.get(scores_ref), ray.get(ref_probs_ref))
 
     ray.shutdown()
 

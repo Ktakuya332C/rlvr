@@ -166,3 +166,26 @@ class ReferenceWorker:
             index=input_output_ids_torch.unsqueeze(-1),
         ).squeeze(-1)
         return ref_probs.numpy()
+
+
+@ray.remote
+class ReferenceDispatcher:
+
+    def __init__(self, reference_workers):
+        self._pool = ActorPool(reference_workers)
+
+    def process(self, input_output_ids, input_output_mask, batch_size):
+        assert len(input_output_ids) == len(input_output_mask)
+        assert len(input_output_ids) % batch_size == 0
+        fn = lambda a, v: a.process.remote(v[0], v[1])
+        args = []
+        for bgn in range(0, len(input_output_ids), batch_size):
+            arg = (
+                input_output_ids[bgn : bgn + batch_size],
+                input_output_mask[bgn : bgn + batch_size],
+            )
+            args.append(arg)
+        ref_probs_list = []
+        for ref_probs in self._pool.map(fn, args):
+            ref_probs_list.append(ref_probs)
+        return np.concatenate(ref_probs_list)

@@ -106,3 +106,15 @@ def test_reference_worker():
     input_output_mask = np.array([[0, 1, 1, 1, 1]])
     ref_probs = ray.get(actor.process.remote(input_output_ids, input_output_mask))
     assert ref_probs.shape == (1, 5)
+
+
+def test_reference_dispatcher():
+    actor1 = actors.ReferenceWorker.remote("sbintuitions/tiny-lm")
+    actor2 = actors.ReferenceWorker.remote("sbintuitions/tiny-lm")
+    actor = actors.ReferenceDispatcher.remote([actor1, actor2])
+    input_output_ids = np.array([[489, 310], [3252, 310]])
+    input_output_mask = np.ones((2, 2), dtype=np.int64)
+    ref_probs = ray.get(
+        actor.process.remote(input_output_ids, input_output_mask, batch_size=1)
+    )
+    assert ref_probs.shape == (2, 2)
