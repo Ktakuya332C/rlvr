@@ -48,12 +48,20 @@ def test_rollout_worker():
     actor = actors.RolloutWorker.remote("sbintuitions/tiny-lm")
     input_ids = np.array([[3, 489, 310, 287, 8926]])
     attention_mask = np.array([[0, 1, 1, 1, 1]])
+
     input_outputs, input_output_mask, output_mask = ray.get(
         actor.process.remote(input_ids, attention_mask, 6)
     )
     np.testing.assert_equal(input_outputs, np.array([[3, 489, 310, 287, 8926, 5477]]))
     np.testing.assert_equal(input_output_mask, np.array([[0, 1, 1, 1, 1, 1]]))
     np.testing.assert_equal(output_mask, np.array([[0, 0, 0, 0, 0, 1]]))
+
+    input_outputs, input_output_mask, output_mask = ray.get(
+        actor.process.remote(input_ids, attention_mask, 6, True, 1.0, 2)
+    )
+    assert input_outputs.shape == (2, 6)
+    assert input_output_mask.shape == (2, 6)
+    assert output_mask.shape == (2, 6)
 
 
 def test_rollout_postprocess():

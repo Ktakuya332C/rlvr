@@ -11,13 +11,6 @@ from rlvr.dist import TorchDistActor
 
 
 @ray.remote
-class Replicator:
-
-    def process(self, arr, num_replica):
-        return arr.repeat(num_replica, axis=0)
-
-
-@ray.remote
 class Tokenizer:
 
     def __init__(self, tokenizer_path, padding_side="left"):
@@ -81,6 +74,7 @@ class RolloutWorker(TorchDistActor):
             temperature=temperature,
             num_return_sequences=num_return_sequences,
         )
+        attention_mask = attention_mask.repeat(num_return_sequences, axis=0)
         input_output_mask, output_mask = _rollout_postprocess(
             input_outputs=input_outputs.numpy(),
             input_mask=attention_mask,
@@ -108,10 +102,26 @@ class RolloutDispatcher:
         self._pool = ActorPool(rollout_workers)
 
     @ray.method(num_returns=3)
-    def process(self, input_ids, attention_mask, batch_size, max_length):
+    def process(
+        self,
+        input_ids,
+        attention_mask,
+        batch_size,
+        max_length,
+        do_sample=True,
+        temperature=1.0,
+        num_return_sequences=1,
+    ):
         assert len(input_ids) == len(attention_mask)
         assert len(input_ids) % batch_size == 0
-        fn = lambda a, v: a.process.remote(v[0], v[1], max_length)
+        fn = lambda a, v: a.process.remote(
+            input_ids=v[0],
+            attention_mask=v[1],
+            max_length=max_length,
+            do_sample=do_sample,
+            temperature=temperature,
+            num_return_sequences=num_return_sequences,
+        )
         args = []
         for bgn in range(0, len(input_ids), batch_size):
             arg = (
@@ -131,6 +141,13 @@ class RolloutDispatcher:
             np.concatenate(input_output_mask_list),
             np.concatenate(input_output_mask_list),
         )
+
+
+@ray.remote
+class Replicator:
+
+    def process(self, arr, num_replica):
+        return arr.repeat(num_replica, axis=0)
 
 
 @ray.remote
