@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "simple-rlvr"
+version = "0.1.0"
+description = "Simple implementation of reinforcement learning with verifiable rewards"
+authors = ["Takuya kato <takuya.kato@dummy.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+transformers = "^4.48.1"
+ray = {extras = ["default"], version = "^2.41.0"}
+datasets = "^3.2.0"
+torch = "^2.5.1"
+tiktoken = "^0.8.0"
+sentencepiece = "^0.2.0"
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+black = "^24.10.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
