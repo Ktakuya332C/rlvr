@@ -141,7 +141,7 @@ def test_grpo_loss():
     log_probs = F.log_softmax(torch.randn(3 * 2, 5), dim=-1)
     output_mask = torch.ones((3 * 2, 5))
     scores = torch.randn(3 * 2)
-    loss = actors._grpo_loss(
+    policy_loss, _ = actors._grpo_loss(
         num_generations=2,
         log_probs=log_probs,
         old_log_probs=log_probs,
@@ -150,6 +150,58 @@ def test_grpo_loss():
         scores=scores,
         ratios_clip_eps=0.2,
         scores_std_eps=1e-4,
-        kl_loss_coef=0.0,
     )
-    torch.testing.assert_close(loss, torch.zeros_like(loss))
+    torch.testing.assert_close(policy_loss, torch.zeros_like(policy_loss))
+
+
+def test_grpo_learner():
+    actor = actors.GRPOLearner.remote(
+        model_path="sbintuitions/tiny-lm",
+        learning_rate=1e-6,
+        gradient_accumulation_steps=2,
+    )
+    input_output_ids = np.array(
+        [
+            [3, 407, 310, 271, 3351],
+            [3, 407, 310, 275, 374],
+            [324, 310, 354, 287, 271],
+            [324, 310, 354, 335, 287],
+        ]
+    )
+    input_output_mask = np.array(
+        [
+            [0, 1, 1, 1, 1],
+            [0, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+        ]
+    )
+    output_mask = np.array(
+        [
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+        ]
+    )
+    log_probs = np.array(
+        [
+            [-20.0, -5.0, -5.0, -7.0, -11.0],
+            [-20.0, -5.0, -5.0, -7.0, -6.0],
+            [-3.0, -5.0, -6.0, -4.0, -7.0],
+            [-3.0, -5.0, -6.0, -4.0, -8.0],
+        ]
+    )
+    scores = np.array([0.0, 1.0, 0.0, 0.0])
+    for _ in range(2):
+        _ = ray.get(
+            actor.process.remote(
+                num_generations=2,
+                input_output_ids=input_output_ids,
+                input_output_mask=input_output_mask,
+                output_mask=output_mask,
+                ref_log_probs=log_probs,
+                old_log_probs=log_probs,
+                scores=scores,
+            )
+        )

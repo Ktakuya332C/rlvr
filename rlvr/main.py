@@ -9,6 +9,7 @@ from rlvr.actors import (
     LastIntScorer,
     ReferenceWorker,
     ReferenceDispatcher,
+    GRPOLearner,
 )
 
 

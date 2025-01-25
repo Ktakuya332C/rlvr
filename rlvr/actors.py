@@ -216,10 +216,16 @@ class ReferenceDispatcher:
 
 
 @ray.remote
-class GRPOLeaner(TorchDistActor):
+class GRPOLearner(TorchDistActor):
 
-    def __init__(self, model_path):
+    def __init__(self, model_path, learning_rate=1e-6, gradient_accumulation_steps=1):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
+        self._optimizer = torch.optim.AdamW(
+            params=self._model.parameters(),
+            lr=learning_rate,
+        )
+        self._gradient_accumulation_steps = gradient_accumulation_steps
+        self._gradient_accumulation_count = 0
 
     def process(
         self,
@@ -262,16 +268,26 @@ class GRPOLeaner(TorchDistActor):
         ).squeeze(-1)
 
         # calculate loss
-        loss = _grpo_loss(
+        policy_loss, kl_loss = _grpo_loss(
             num_generations=num_generations,
             log_probs=log_probs_torch,
             old_log_probs=old_log_probs_torch,
             ref_log_probs=ref_log_probs_torch,
+            output_mask=output_mask_torch,
             scores=scores_torch,
             ratios_clip_eps=ratios_clip_eps,
             scores_std_eps=scores_std_eps,
-            kl_loss_coef=kl_loss_coef,
         )
+        loss = policy_loss + kl_loss_coef * kl_loss
+        loss.backward()
+        self._gradient_accumulation_count += 1
+
+        if self._gradient_accumulation_count >= self._gradient_accumulation_steps:
+            self._optimizer.step()
+            self._optimizer.zero_grad()
+            self._gradient_accumulation_count = 0
+
+        return loss.item()
 
 
 def _grpo_loss(
@@ -283,7 +299,6 @@ def _grpo_loss(
     scores,
     ratios_clip_eps,
     scores_std_eps,
-    kl_loss_coef,
 ):
     # advantage estimation
     means = (
@@ -309,13 +324,41 @@ def _grpo_loss(
         ratios * advantages.unsqueeze(-1),
         clipped_ratios * advantages.unsqueeze(-1),
     )
+    policy_loss = (
+        (per_token_policy_loss * output_mask).sum(dim=-1) / output_mask.sum(dim=-1)
+    ).mean()
 
     # kl loss
     per_token_kl_loss = (
         torch.exp(ref_log_probs - log_probs) - (ref_log_probs - log_probs) - 1.0
     )
+    kl_loss = (
+        (per_token_kl_loss * output_mask).sum(dim=-1) / output_mask.sum(dim=-1)
+    ).mean()
 
     # loss
-    per_token_loss = per_token_policy_loss + kl_loss_coef * per_token_kl_loss
-    loss = ((per_token_loss * output_mask).sum(dim=-1) / output_mask.sum(dim=-1)).mean()
-    return loss
+    return policy_loss, kl_loss
+
+
+@ray.remote
+class GRPODispatcher:
+
+    def __init__(self, grpo_learners):
+        self._pool = ActorPool(grpo_learners)
+
+    def process(self, input_output_ids, input_output_mask, batch_size):
+        assert len(input_output_ids) == len(input_output_mask)
+        assert len(input_output_ids) % batch_size == 0
+        fn = lambda a, v: a.process.remote(v[0], v[1])
+        args = []
+        for bgn in range(0, len(input_output_ids), batch_size):
+            arg = (
+                input_output_ids[bgn : bgn + batch_size],
+                input_output_mask[bgn : bgn + batch_size],
+            )
+            args.append(arg)
+        ref_probs_list = []
+        for ref_probs in self._pool.map(fn, args):
+            ref_probs_list.append(ref_probs)
+        return np.concatenate(ref_probs_list)
+
