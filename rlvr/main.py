@@ -40,10 +40,6 @@ def main():
     for rank, worker in enumerate(weight_share_group):
         worker.new_group.remote(weight_share_ranks, group_name="weight-share")
 
-    src_rank = ray.get(weight_share_group[0].get_rank.remote())
-    for worker in weight_share_group:
-        worker.sync.remote(src_rank, "weight-share")
-
     dataloader = get_gsm8k()
     for batch in dataloader.iter_batches(batch_size=12):
         loss_refs = []

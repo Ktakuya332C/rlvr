@@ -340,7 +340,7 @@ def _grpo_loss(
         clipped_ratios * advantages.unsqueeze(-1),
     )
     policy_loss = (
-        (per_token_policy_loss * output_mask).sum(dim=-1) / output_mask.sum(dim=-1)
+        (per_token_policy_loss[:, :-1] * output_mask[:, 1:]).sum(dim=-1) / output_mask[:, 1:].sum(dim=-1)
     ).mean()
 
     # kl loss
@@ -348,7 +348,7 @@ def _grpo_loss(
         torch.exp(ref_log_probs - log_probs) - (ref_log_probs - log_probs) - 1.0
     )
     kl_loss = (
-        (per_token_kl_loss * output_mask).sum(dim=-1) / output_mask.sum(dim=-1)
+        (per_token_kl_loss[:, :-1] * output_mask[:, 1:]).sum(dim=-1) / output_mask[:, 1:].sum(dim=-1)
     ).mean()
 
     # loss
