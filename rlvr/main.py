@@ -10,6 +10,7 @@ from rlvr.actors import (
     ReferenceWorker,
     ReferenceDispatcher,
     GRPOLearner,
+    GRPODispatcher,
 )
 
 
@@ -28,6 +29,9 @@ def main():
     )
     old_log_prob_dispatcher = ReferenceDispatcher.remote(
         [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
+    )
+    grpo_dispatcher = GRPODispatcher.remote(
+        [GRPOLearner.remote("sbintuitions/tiny-lm") for _ in range(2)]
     )
 
     dataloader = get_gsm8k()
@@ -66,8 +70,18 @@ def main():
             input_output_mask=input_output_mask_ref,
             batch_size=2,
         )
+        loss_ref = grpo_dispatcher.process.remote(
+            num_generations=2,
+            input_output_ids=input_outputs_ref,
+            input_output_mask=input_output_mask_ref,
+            output_mask=output_mask_ref,
+            ref_log_probs=ref_log_probs_ref,
+            old_log_probs=old_log_probs_ref,
+            scores=scores_ref,
+            batch_size=6,
+        )
 
-    print(ray.get(scores_ref), ray.get(ref_log_probs_ref))
+    print(ray.get(loss_ref))
 
     ray.shutdown()
 
