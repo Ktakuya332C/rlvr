@@ -83,6 +83,10 @@ class RolloutWorker(TorchDistActor):
         )
         return input_outputs, input_output_mask, output_mask
 
+    def sync(self, src_rank, group_name):
+        for param in self._model.parameters():
+            self._broadcast(param.data, src_rank, group_name)
+
 
 def _rollout_postprocess(input_outputs, input_mask, eos_token_id):
     input_output_eos_mask = (input_outputs == eos_token_id).astype(np.int64)
@@ -193,6 +197,10 @@ class ReferenceWorker(TorchDistActor):
         ).squeeze(-1)
         return ref_log_probs.numpy()
 
+    def sync(self, src_rank, group_name):
+        for param in self._model.parameters():
+            self._broadcast(param.data, src_rank, group_name)
+
 
 @ray.remote
 class ReferenceDispatcher:
@@ -291,6 +299,10 @@ class GRPOLearner(TorchDistActor):
             self._gradient_accumulation_count = 0
 
         return loss.item()
+
+    def sync(self, src_rank, group_name):
+        for param in self._model.parameters():
+            self._broadcast(param.data, src_rank, group_name)
 
 
 def _grpo_loss(

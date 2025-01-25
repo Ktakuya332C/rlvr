@@ -266,3 +266,24 @@ def test_grpo_dispatcher():
                 batch_size=2,
             )
         )
+
+
+def test_sync():
+    actor1 = actors.GRPOLearner.remote("sbintuitions/tiny-lm")
+    actor2 = actors.RolloutWorker.remote("sbintuitions/tiny-lm")
+    actor3 = actors.ReferenceWorker.remote("sbintuitions/tiny-lm")
+    actor4 = actors.ReferenceWorker.remote("sbintuitions/tiny-lm")
+
+    host, port = ray.get(actor1.get_addr.remote())
+    actor1.init_process_group.remote(host, port, 4, 0)
+    actor2.init_process_group.remote(host, port, 4, 1)
+    actor3.init_process_group.remote(host, port, 4, 2)
+    actor4.init_process_group.remote(host, port, 4, 3)
+
+    actor1.new_group.remote([0, 1, 2], "local")
+    actor2.new_group.remote([0, 1, 2], "local")
+    actor3.new_group.remote([0, 1, 2], "local")
+
+    actor1.sync.remote(0, "local")
+    actor2.sync.remote(0, "local")
+    actor3.sync.remote(0, "local")
