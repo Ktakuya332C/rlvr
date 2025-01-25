@@ -41,56 +41,58 @@ def main():
         worker.new_group.remote(weight_share_ranks, group_name="weight-share")
 
     dataloader = get_gsm8k()
-    for batch in dataloader.iter_batches(batch_size=12):
+    for batch in dataloader.iter_batches(batch_size=24):
         loss_refs = []
         for bgn in range(0, 12, 6):
-            questions = batch["question"][bgn : bgn + 6]
-            answers = batch["answer"][bgn : bgn + 6]
-            input_ids_ref, attention_mask_ref = tokenizer.process.remote(
-                texts=questions,
-                apply_chat_template=False,
-            )
-            input_outputs_ref, input_output_mask_ref, output_mask_ref = (
-                rollout_dispatcher.process.remote(
-                    input_ids=input_ids_ref,
-                    attention_mask=attention_mask_ref,
-                    batch_size=2,
-                    max_length=512,
-                    do_sample=True,
-                    temperature=1.0,
-                    num_return_sequences=2,
+            for i in range(0, 12, 6):
+                questions = batch["question"][bgn : bgn + 6]
+                answers = batch["answer"][bgn : bgn + 6]
+                input_ids_ref, attention_mask_ref = tokenizer.process.remote(
+                    texts=questions,
+                    apply_chat_template=False,
                 )
-            )
-            output_texts_ref = detokenizer.process.remote(
-                tokens=input_outputs_ref,
-                attention_mask=output_mask_ref,
-            )
-            repl_answers_ref = replicator.process.remote(answers, 2)
-            scores_ref = scorer.process.remote(
-                responses=output_texts_ref,
-                answers=repl_answers_ref,
-            )
-            ref_log_probs_ref = ref_dispatcher.process.remote(
-                input_output_ids=input_outputs_ref,
-                input_output_mask=input_output_mask_ref,
-                batch_size=2,
-            )
-            old_log_probs_ref = old_dispatcher.process.remote(
-                input_output_ids=input_outputs_ref,
-                input_output_mask=input_output_mask_ref,
-                batch_size=2,
-            )
-            loss_ref = grpo_dispatcher.process.remote(
-                num_generations=2,
-                input_output_ids=input_outputs_ref,
-                input_output_mask=input_output_mask_ref,
-                output_mask=output_mask_ref,
-                ref_log_probs=ref_log_probs_ref,
-                old_log_probs=old_log_probs_ref,
-                scores=scores_ref,
-                batch_size=6,
-            )
-            loss_refs.append(loss_ref)
+                input_outputs_ref, input_output_mask_ref, output_mask_ref = (
+                    rollout_dispatcher.process.remote(
+                        input_ids=input_ids_ref,
+                        attention_mask=attention_mask_ref,
+                        batch_size=2,
+                        max_length=512,
+                        do_sample=True,
+                        temperature=1.0,
+                        num_return_sequences=2,
+                    )
+                )
+                output_texts_ref = detokenizer.process.remote(
+                    tokens=input_outputs_ref,
+                    attention_mask=output_mask_ref,
+                )
+                repl_answers_ref = replicator.process.remote(answers, 2)
+                scores_ref = scorer.process.remote(
+                    responses=output_texts_ref,
+                    answers=repl_answers_ref,
+                )
+                ref_log_probs_ref = ref_dispatcher.process.remote(
+                    input_output_ids=input_outputs_ref,
+                    input_output_mask=input_output_mask_ref,
+                    batch_size=2,
+                )
+                old_log_probs_ref = old_dispatcher.process.remote(
+                    input_output_ids=input_outputs_ref,
+                    input_output_mask=input_output_mask_ref,
+                    batch_size=2,
+                )
+                loss_ref = grpo_dispatcher.process.remote(
+                    num_generations=2,
+                    input_output_ids=input_outputs_ref,
+                    input_output_mask=input_output_mask_ref,
+                    output_mask=output_mask_ref,
+                    ref_log_probs=ref_log_probs_ref,
+                    old_log_probs=old_log_probs_ref,
+                    scores=scores_ref,
+                    batch_size=6,
+                )
+                loss_refs.append(loss_ref)
+            grpo_dispatcher.update.remote(loss_ref)
         losses = ray.get(loss_refs)
         print("loss =", np.concatenate(losses).mean())
 

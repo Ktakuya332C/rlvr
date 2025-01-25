@@ -158,7 +158,6 @@ def test_grpo_learner():
     actor = actors.GRPOLearner.remote(
         model_path="sbintuitions/tiny-lm",
         learning_rate=1e-6,
-        gradient_accumulation_steps=2,
     )
     input_output_ids = np.array(
         [
@@ -193,30 +192,26 @@ def test_grpo_learner():
         ]
     )
     scores = np.array([0.0, 1.0, 0.0, 0.0])
-    for _ in range(2):
-        _ = ray.get(
-            actor.process.remote(
-                num_generations=2,
-                input_output_ids=input_output_ids,
-                input_output_mask=input_output_mask,
-                output_mask=output_mask,
-                ref_log_probs=log_probs,
-                old_log_probs=log_probs,
-                scores=scores,
-            )
-        )
+    loss_ref = actor.process.remote(
+        num_generations=2,
+        input_output_ids=input_output_ids,
+        input_output_mask=input_output_mask,
+        output_mask=output_mask,
+        ref_log_probs=log_probs,
+        old_log_probs=log_probs,
+        scores=scores,
+    )
+    ray.get(actor.update.remote(loss_ref))
 
 
 def test_grpo_dispatcher():
     actor1 = actors.GRPOLearner.remote(
         model_path="sbintuitions/tiny-lm",
         learning_rate=1e-6,
-        gradient_accumulation_steps=2,
     )
     actor2 = actors.GRPOLearner.remote(
         model_path="sbintuitions/tiny-lm",
         learning_rate=1e-6,
-        gradient_accumulation_steps=2,
     )
     actor = actors.GRPODispatcher.remote([actor1, actor2])
 
@@ -253,19 +248,17 @@ def test_grpo_dispatcher():
         ]
     )
     scores = np.array([0.0, 1.0, 0.0, 0.0])
-    for _ in range(2):
-        _ = ray.get(
-            actor.process.remote(
-                num_generations=2,
-                input_output_ids=input_output_ids,
-                input_output_mask=input_output_mask,
-                output_mask=output_mask,
-                ref_log_probs=log_probs,
-                old_log_probs=log_probs,
-                scores=scores,
-                batch_size=2,
-            )
-        )
+    loss_ref = actor.process.remote(
+        num_generations=2,
+        input_output_ids=input_output_ids,
+        input_output_mask=input_output_mask,
+        output_mask=output_mask,
+        ref_log_probs=log_probs,
+        old_log_probs=log_probs,
+        scores=scores,
+        batch_size=2,
+    )
+    ray.get(actor.update.remote(loss_ref))
 
 
 def test_sync():

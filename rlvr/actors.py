@@ -228,15 +228,13 @@ class ReferenceDispatcher:
 @ray.remote
 class GRPOLearner(TorchDistActor):
 
-    def __init__(self, model_path, learning_rate=1e-6, gradient_accumulation_steps=1):
+    def __init__(self, model_path, learning_rate=1e-6):
         super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
         self._optimizer = torch.optim.AdamW(
             params=self._model.parameters(),
             lr=learning_rate,
         )
-        self._gradient_accumulation_steps = gradient_accumulation_steps
-        self._gradient_accumulation_count = 0
 
     def process(
         self,
@@ -291,14 +289,12 @@ class GRPOLearner(TorchDistActor):
         )
         loss = policy_loss + kl_loss_coef * kl_loss
         loss.backward()
-        self._gradient_accumulation_count += 1
-
-        if self._gradient_accumulation_count >= self._gradient_accumulation_steps:
-            self._optimizer.step()
-            self._optimizer.zero_grad()
-            self._gradient_accumulation_count = 0
 
         return loss.item()
+
+    def update(self, loss_):
+        self._optimizer.step()
+        self._optimizer.zero_grad()
 
     def sync(self, src_rank, group_name):
         for param in self._model.parameters():
@@ -340,7 +336,8 @@ def _grpo_loss(
         clipped_ratios * advantages.unsqueeze(-1),
     )
     policy_loss = (
-        (per_token_policy_loss[:, :-1] * output_mask[:, 1:]).sum(dim=-1) / output_mask[:, 1:].sum(dim=-1)
+        (per_token_policy_loss[:, :-1] * output_mask[:, 1:]).sum(dim=-1)
+        / output_mask[:, 1:].sum(dim=-1)
     ).mean()
 
     # kl loss
@@ -348,7 +345,8 @@ def _grpo_loss(
         torch.exp(ref_log_probs - log_probs) - (ref_log_probs - log_probs) - 1.0
     )
     kl_loss = (
-        (per_token_kl_loss[:, :-1] * output_mask[:, 1:]).sum(dim=-1) / output_mask[:, 1:].sum(dim=-1)
+        (per_token_kl_loss[:, :-1] * output_mask[:, 1:]).sum(dim=-1)
+        / output_mask[:, 1:].sum(dim=-1)
     ).mean()
 
     # loss
@@ -404,3 +402,8 @@ class GRPODispatcher:
         for idx, loss in enumerate(self._pool.map(fn, args)):
             losses[idx] = loss
         return losses
+
+    def update(self, loss_):
+        args = [loss_ for _ in range(self._num_learners)]
+        fn = lambda a, v: a.update.remote(v)
+        self._pool.map(fn, args)
