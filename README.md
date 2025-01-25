@@ -14,6 +14,3 @@ $ potry run python -m rlvr.main
 $ poetry run black .
 $ poetry run pytest -xsvv tests
 ```
-
-## Notes
-- You may need to set `GLOO_SOCKET_IFNAM` to loopback (e.g. lo0)
