@@ -205,3 +205,64 @@ def test_grpo_learner():
                 scores=scores,
             )
         )
+
+
+def test_grpo_dispatcher():
+    actor1 = actors.GRPOLearner.remote(
+        model_path="sbintuitions/tiny-lm",
+        learning_rate=1e-6,
+        gradient_accumulation_steps=2,
+    )
+    actor2 = actors.GRPOLearner.remote(
+        model_path="sbintuitions/tiny-lm",
+        learning_rate=1e-6,
+        gradient_accumulation_steps=2,
+    )
+    actor = actors.GRPODispatcher.remote([actor1, actor2])
+
+    input_output_ids = np.array(
+        [
+            [3, 407, 310, 271, 3351],
+            [3, 407, 310, 275, 374],
+            [324, 310, 354, 287, 271],
+            [324, 310, 354, 335, 287],
+        ]
+    )
+    input_output_mask = np.array(
+        [
+            [0, 1, 1, 1, 1],
+            [0, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1],
+        ]
+    )
+    output_mask = np.array(
+        [
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1],
+        ]
+    )
+    log_probs = np.array(
+        [
+            [-20.0, -5.0, -5.0, -7.0, -11.0],
+            [-20.0, -5.0, -5.0, -7.0, -6.0],
+            [-3.0, -5.0, -6.0, -4.0, -7.0],
+            [-3.0, -5.0, -6.0, -4.0, -8.0],
+        ]
+    )
+    scores = np.array([0.0, 1.0, 0.0, 0.0])
+    for _ in range(2):
+        _ = ray.get(
+            actor.process.remote(
+                num_generations=2,
+                input_output_ids=input_output_ids,
+                input_output_mask=input_output_mask,
+                output_mask=output_mask,
+                ref_log_probs=log_probs,
+                old_log_probs=log_probs,
+                scores=scores,
+                batch_size=2,
+            )
+        )

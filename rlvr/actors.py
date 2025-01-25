@@ -345,20 +345,47 @@ class GRPODispatcher:
 
     def __init__(self, grpo_learners):
         self._pool = ActorPool(grpo_learners)
+        self._num_learners = len(grpo_learners)
 
-    def process(self, input_output_ids, input_output_mask, batch_size):
+    def process(
+        self,
+        num_generations,
+        input_output_ids,
+        input_output_mask,
+        output_mask,
+        ref_log_probs,
+        old_log_probs,
+        scores,
+        ratios_clip_eps=0.2,
+        scores_std_eps=1e-4,
+        kl_loss_coef=0.05,
+        batch_size=1,
+    ):
         assert len(input_output_ids) == len(input_output_mask)
-        assert len(input_output_ids) % batch_size == 0
-        fn = lambda a, v: a.process.remote(v[0], v[1])
+        assert len(input_output_ids) == len(output_mask)
+        assert len(input_output_ids) == len(ref_log_probs)
+        assert len(input_output_ids) == len(old_log_probs)
+        assert len(input_output_ids) == len(scores)
+        assert len(input_output_ids) == batch_size * self._num_learners
+        assert batch_size % num_generations == 0
+
+        fn = lambda a, kwargs: a.process.remote(**kwargs)
         args = []
         for bgn in range(0, len(input_output_ids), batch_size):
-            arg = (
-                input_output_ids[bgn : bgn + batch_size],
-                input_output_mask[bgn : bgn + batch_size],
+            kwargs = dict(
+                num_generations=num_generations,
+                input_output_ids=input_output_ids[bgn : bgn + batch_size],
+                input_output_mask=input_output_mask[bgn : bgn + batch_size],
+                output_mask=output_mask[bgn : bgn + batch_size],
+                ref_log_probs=ref_log_probs[bgn : bgn + batch_size],
+                old_log_probs=old_log_probs[bgn : bgn + batch_size],
+                scores=scores[bgn : bgn + batch_size],
+                ratios_clip_eps=ratios_clip_eps,
+                scores_std_eps=scores_std_eps,
+                kl_loss_coef=kl_loss_coef,
             )
-            args.append(arg)
-        ref_probs_list = []
-        for ref_probs in self._pool.map(fn, args):
-            ref_probs_list.append(ref_probs)
-        return np.concatenate(ref_probs_list)
-
+            args.append(kwargs)
+        losses = np.empty(self._num_learners)
+        for idx, loss in enumerate(self._pool.map(fn, args)):
+            losses[idx] = loss
+        return losses
