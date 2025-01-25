@@ -164,7 +164,7 @@ class LastIntScorer:
 
 
 @ray.remote
-class ReferenceWorker:
+class ReferenceWorker(TorchDistActor):
 
     def __init__(self, model_path):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
@@ -227,20 +227,95 @@ class GRPOLeaner(TorchDistActor):
         input_output_ids,
         input_output_mask,
         output_mask,
-        ref_probs,
+        ref_log_probs,
+        old_log_probs,
         scores,
+        ratios_clip_eps=0.2,
+        scores_std_eps=1e-4,
+        kl_loss_coef=0.05,
     ):
+        assert len(input_output_ids) == len(input_output_mask)
+        assert len(input_output_ids) == len(output_mask)
+        assert len(input_output_ids) == len(ref_log_probs)
+        assert len(input_output_ids) == len(old_log_probs)
+        assert len(input_output_ids) == len(scores)
+        assert len(input_output_ids) % num_generations == 0
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             input_output_ids_torch = torch.from_numpy(input_output_ids)
             input_output_mask_torch = torch.from_numpy(input_output_mask)
+            output_mask_torch = torch.from_numpy(output_mask)
+            ref_log_probs_torch = torch.from_numpy(ref_log_probs)
+            old_log_probs_torch = torch.from_numpy(old_log_probs)
+            scores_torch = torch.from_numpy(scores)
+
+        # policy forward pass
         result = self._model(
             input_ids=input_output_ids_torch,
             attention_mask=input_output_mask_torch,
         )
-        log_softmax = F.log_softmax(result.logits, dim=-1)
-        log_probs = torch.gather(
-            input=log_softmax,
+        log_softmax_torch = F.log_softmax(result.logits, dim=-1)
+        log_probs_torch = torch.gather(
+            input=log_softmax_torch,
             dim=-1,
             index=input_output_ids_torch.unsqueeze(-1),
         ).squeeze(-1)
+
+        # calculate loss
+        loss = _grpo_loss(
+            num_generations=num_generations,
+            log_probs=log_probs_torch,
+            old_log_probs=old_log_probs_torch,
+            ref_log_probs=ref_log_probs_torch,
+            scores=scores_torch,
+            ratios_clip_eps=ratios_clip_eps,
+            scores_std_eps=scores_std_eps,
+            kl_loss_coef=kl_loss_coef,
+        )
+
+
+def _grpo_loss(
+    num_generations,
+    log_probs,
+    old_log_probs,
+    ref_log_probs,
+    output_mask,
+    scores,
+    ratios_clip_eps,
+    scores_std_eps,
+    kl_loss_coef,
+):
+    # advantage estimation
+    means = (
+        scores.view(-1, num_generations)
+        .mean(dim=-1)
+        .repeat_interleave(num_generations, axis=0)
+    )
+    stds = (
+        scores.view(-1, num_generations)
+        .std(dim=-1)
+        .repeat_interleave(num_generations, axis=0)
+    )
+    advantages = (scores - means) / (stds + scores_std_eps)
+
+    # policy loss
+    ratios = torch.exp(log_probs - old_log_probs)
+    clipped_ratios = torch.clamp(
+        input=ratios,
+        min=1 - ratios_clip_eps,
+        max=1 + ratios_clip_eps,
+    )
+    per_token_policy_loss = torch.minimum(
+        ratios * advantages.unsqueeze(-1),
+        clipped_ratios * advantages.unsqueeze(-1),
+    )
+
+    # kl loss
+    per_token_kl_loss = (
+        torch.exp(ref_log_probs - log_probs) - (ref_log_probs - log_probs) - 1.0
+    )
+
+    # loss
+    per_token_loss = per_token_policy_loss + kl_loss_coef * per_token_kl_loss
+    loss = ((per_token_loss * output_mask).sum(dim=-1) / output_mask.sum(dim=-1)).mean()
+    return loss

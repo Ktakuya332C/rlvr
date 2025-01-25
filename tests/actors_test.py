@@ -1,5 +1,7 @@
 import ray
+import torch
 import numpy as np
+from torch.nn import functional as F
 
 from rlvr import actors
 
@@ -133,3 +135,21 @@ def test_reference_dispatcher():
         actor.process.remote(input_output_ids, input_output_mask, batch_size=1)
     )
     assert ref_log_probs.shape == (2, 2)
+
+
+def test_grpo_loss():
+    log_probs = F.log_softmax(torch.randn(3 * 2, 5), dim=-1)
+    output_mask = torch.ones((3 * 2, 5))
+    scores = torch.randn(3 * 2)
+    loss = actors._grpo_loss(
+        num_generations=2,
+        log_probs=log_probs,
+        old_log_probs=log_probs,
+        ref_log_probs=log_probs,
+        output_mask=output_mask,
+        scores=scores,
+        ratios_clip_eps=0.2,
+        scores_std_eps=1e-4,
+        kl_loss_coef=0.0,
+    )
+    torch.testing.assert_close(loss, torch.zeros_like(loss))
