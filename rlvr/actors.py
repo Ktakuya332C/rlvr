@@ -49,6 +49,7 @@ class DeTokenizer:
 class RolloutWorker(TorchDistActor):
 
     def __init__(self, model_path):
+        super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
 
     @ray.method(num_returns=3)
@@ -167,6 +168,7 @@ class LastIntScorer:
 class ReferenceWorker(TorchDistActor):
 
     def __init__(self, model_path):
+        super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
 
     def process(
@@ -219,6 +221,7 @@ class ReferenceDispatcher:
 class GRPOLearner(TorchDistActor):
 
     def __init__(self, model_path, learning_rate=1e-6, gradient_accumulation_steps=1):
+        super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
         self._optimizer = torch.optim.AdamW(
             params=self._model.parameters(),

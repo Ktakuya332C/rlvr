@@ -9,10 +9,9 @@ class TorchDistActor:
         self._groups = {}
 
     def get_addr(self):
-        host = socket.gethostname()
         s = socket.socket()
         s.bind(("", 0))
-        _, port = s.getsockname()
+        host, port = s.getsockname()
         return host, port
 
     def init_process_group(self, master_host, master_port, world_size, rank):

@@ -18,21 +18,22 @@ def main():
     ray.init()
 
     tokenizer = Tokenizer.remote("sbintuitions/tiny-lm")
-    rollout_dispatcher = RolloutDispatcher.remote(
-        [RolloutWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
-    )
+    rollout_workers = [RolloutWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
+    rollout_dispatcher = RolloutDispatcher.remote(rollout_workers)
     detokenizer = DeTokenizer.remote("sbintuitions/tiny-lm")
     replicator = Replicator.remote()
     scorer = LastIntScorer.remote()
-    ref_log_prob_dispatcher = ReferenceDispatcher.remote(
-        [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
-    )
-    old_log_prob_dispatcher = ReferenceDispatcher.remote(
-        [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
-    )
-    grpo_dispatcher = GRPODispatcher.remote(
-        [GRPOLearner.remote("sbintuitions/tiny-lm") for _ in range(2)]
-    )
+    ref_workers = [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
+    ref_dispatcher = ReferenceDispatcher.remote(ref_workers)
+    old_workers = [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
+    old_dispatcher = ReferenceDispatcher.remote(old_workers)
+    grpo_workers = [GRPOLearner.remote("sbintuitions/tiny-lm") for _ in range(2)]
+    grpo_dispatcher = GRPODispatcher.remote(grpo_workers)
+
+    global_dist_group = grpo_workers + old_workers + rollout_workers
+    host, port = ray.get(global_dist_group[0].get_addr.remote())
+    for rank, worker in enumerate(global_dist_group):
+        worker.init_process_group.remote(host, port, len(global_dist_group), rank)
 
     dataloader = get_gsm8k()
     for batch in dataloader.iter_batches(batch_size=6):
@@ -60,12 +61,12 @@ def main():
             responses=output_texts_ref,
             answers=repl_answers_ref,
         )
-        ref_log_probs_ref = ref_log_prob_dispatcher.process.remote(
+        ref_log_probs_ref = ref_dispatcher.process.remote(
             input_output_ids=input_outputs_ref,
             input_output_mask=input_output_mask_ref,
             batch_size=2,
         )
-        old_log_probs_ref = old_log_prob_dispatcher.process.remote(
+        old_log_probs_ref = old_dispatcher.process.remote(
             input_output_ids=input_outputs_ref,
             input_output_mask=input_output_mask_ref,
             batch_size=2,
