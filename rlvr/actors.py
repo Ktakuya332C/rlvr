@@ -183,13 +183,13 @@ class ReferenceWorker:
                 input_ids=input_output_ids_torch,
                 attention_mask=input_output_mask_torch,
             )
-        probs = F.softmax(result.logits.detach(), dim=-1)
-        ref_probs = torch.gather(
-            input=probs,
+        log_probs = F.log_softmax(result.logits.detach(), dim=-1)
+        ref_log_probs = torch.gather(
+            input=log_probs,
             dim=-1,
             index=input_output_ids_torch.unsqueeze(-1),
         ).squeeze(-1)
-        return ref_probs.numpy()
+        return ref_log_probs.numpy()
 
 
 @ray.remote
@@ -216,17 +216,31 @@ class ReferenceDispatcher:
 
 
 @ray.remote
-class PolicyWorker(TorchDistActor):
+class GRPOLeaner(TorchDistActor):
 
     def __init__(self, model_path):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
 
     def process(
         self,
+        num_generations,
         input_output_ids,
         input_output_mask,
         output_mask,
         ref_probs,
         scores,
     ):
-        pass
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            input_output_ids_torch = torch.from_numpy(input_output_ids)
+            input_output_mask_torch = torch.from_numpy(input_output_mask)
+        result = self._model(
+            input_ids=input_output_ids_torch,
+            attention_mask=input_output_mask_torch,
+        )
+        log_softmax = F.log_softmax(result.logits, dim=-1)
+        log_probs = torch.gather(
+            input=log_softmax,
+            dim=-1,
+            index=input_output_ids_torch.unsqueeze(-1),
+        ).squeeze(-1)

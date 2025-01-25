@@ -52,12 +52,12 @@ def main():
             responses=output_texts_ref,
             answers=repl_answers_ref,
         )
-        ref_probs_ref = reference_dispatcher.process.remote(
+        ref_log_probs_ref = reference_dispatcher.process.remote(
             input_output_ids=input_outputs_ref,
             input_output_mask=input_output_mask_ref,
             batch_size=2,
         )
-    print(ray.get(scores_ref), ray.get(ref_probs_ref))
+    print(ray.get(scores_ref), ray.get(ref_log_probs_ref))
 
     ray.shutdown()
 
