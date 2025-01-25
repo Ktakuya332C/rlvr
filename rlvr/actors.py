@@ -4,6 +4,7 @@ import torch
 import warnings
 import numpy as np
 from ray.util import ActorPool
+from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from rlvr.dist import TorchDistActor
@@ -136,3 +137,32 @@ class LastIntScorer:
             if m and m[-1] != "" and m[-1] == answer:
                 scores[idx] = 1.0
         return scores
+
+
+@ray.remote
+class ReferenceWorker:
+
+    def __init__(self, model_path):
+        self._model = AutoModelForCausalLM.from_pretrained(model_path)
+
+    def process(
+        self,
+        input_output_ids,
+        input_output_mask,
+    ):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            input_output_ids_torch = torch.from_numpy(input_output_ids)
+            input_output_mask_torch = torch.from_numpy(input_output_mask)
+        with torch.no_grad():
+            result = self._model(
+                input_ids=input_output_ids_torch,
+                attention_mask=input_output_mask_torch,
+            )
+        probs = F.softmax(result.logits.detach(), dim=-1)
+        ref_probs = torch.gather(
+            input=probs,
+            dim=-1,
+            index=input_output_ids_torch.unsqueeze(-1),
+        ).squeeze(-1)
+        return ref_probs.numpy()

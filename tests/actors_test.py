@@ -98,3 +98,11 @@ def test_last_int_scorer():
     answers = np.array(["42", "1", "3", "3"])
     scores = ray.get(actor.process.remote(responses, answers))
     np.testing.assert_equal(scores, np.array([1.0, 0.0, 0.0, 1.0]))
+
+
+def test_reference_worker():
+    actor = actors.ReferenceWorker.remote("sbintuitions/tiny-lm")
+    input_output_ids = np.array([[3, 489, 310, 287, 8926]])
+    input_output_mask = np.array([[0, 1, 1, 1, 1]])
+    ref_probs = ray.get(actor.process.remote(input_output_ids, input_output_mask))
+    assert ref_probs.shape == (1, 5)
