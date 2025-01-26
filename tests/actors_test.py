@@ -51,28 +51,31 @@ def test_rollout_worker():
     input_ids = np.array([[3, 489, 310, 287, 8926]])
     attention_mask = np.array([[0, 1, 1, 1, 1]])
 
-    input_outputs, input_output_mask, output_mask = ray.get(
+    input_outputs, input_output_mask, output_mask, output_log_probs = ray.get(
         actor.process.remote(input_ids, attention_mask, 6)
     )
     np.testing.assert_equal(input_outputs, np.array([[3, 489, 310, 287, 8926, 5477]]))
     np.testing.assert_equal(input_output_mask, np.array([[0, 1, 1, 1, 1, 1]]))
     np.testing.assert_equal(output_mask, np.array([[0, 0, 0, 0, 0, 1]]))
+    assert output_log_probs.shape == (1, 6)
 
-    input_outputs, input_output_mask, output_mask = ray.get(
+    input_outputs, input_output_mask, output_mask, output_log_probs = ray.get(
         actor.process.remote(input_ids, attention_mask, 6, True, 1.0, 2)
     )
     assert input_outputs.shape == (2, 6)
     assert input_output_mask.shape == (2, 6)
     assert output_mask.shape == (2, 6)
+    assert output_log_probs.shape == (2, 6)
 
 
 def test_rollout_postprocess():
     input_outputs = np.array(
         [
-            [2, 10, 3, 11, 12, 3, 13, 3, 14],  # <pad> p <eos> p r <eos> r <eos> r
-            [10, 3, 11, 12, 13, 14, 3, 15, 16],  # p <eos> p p r r <eos> r r
+            [2, 4, 3, 5, 6, 3, 7, 3, 8],  # <pad> p <eos> p r <eos> r <eos> r
+            [4, 3, 5, 6, 7, 8, 3, 9, 10],  # p <eos> p p r r <eos> r r
         ]
     )
+    output_logits = np.tile(np.arange(11), (2, 5, 1)).astype(np.float32)
     input_mask = np.array([[0, 1, 1, 1], [1, 1, 1, 1]])
     expected_input_output_mask = np.array(
         [
@@ -86,12 +89,19 @@ def test_rollout_postprocess():
             [0, 0, 0, 0, 1, 1, 1, 0, 0],
         ]
     )
+    expected_output_log_probs = np.array(
+        [
+            [0, 0, 0, -4.45, -7.45, -3.45, -7.45, -2.45, 0],
+            [0, 0, 0, -3.45, -2.45, -7.45, -1.45, -0.45, 0],
+        ]
+    )
     eos_token_id = 3
-    input_output_mask, output_mask = actors._rollout_postprocess(
-        input_outputs, input_mask, eos_token_id
+    input_output_mask, output_mask, output_log_probs = actors._rollout_postprocess(
+        input_outputs, output_logits, input_mask, eos_token_id
     )
     np.testing.assert_equal(input_output_mask, expected_input_output_mask)
     np.testing.assert_equal(output_mask, expected_output_mask)
+    np.testing.assert_allclose(output_log_probs, expected_output_log_probs, atol=0.02)
 
 
 def test_rollout_dispatcher():
@@ -101,10 +111,11 @@ def test_rollout_dispatcher():
     input_ids = np.array([[489, 310], [3252, 310]])
     attention_mask = np.ones((2, 2), dtype=np.int64)
     ref = actor3.process.remote(input_ids, attention_mask, batch_size=1, max_length=3)
-    input_outputs, input_output_mask, output_mask = ray.get(ref)
+    input_outputs, input_output_mask, output_mask, output_log_probs = ray.get(ref)
     assert input_outputs.shape == (2, 3)
     assert input_output_mask.shape == (2, 3)
     assert output_mask.shape == (2, 3)
+    assert output_log_probs.shape == (2, 3)
 
 
 def test_last_int_scorer():
@@ -144,8 +155,8 @@ def test_grpo_loss():
     policy_loss, _ = actors._grpo_loss(
         num_generations=2,
         log_probs=log_probs,
-        old_log_probs=log_probs,
         ref_log_probs=log_probs,
+        output_log_probs=log_probs,
         output_mask=output_mask,
         scores=scores,
         ratios_clip_eps=0.2,
@@ -196,9 +207,9 @@ def test_grpo_learner():
         num_generations=2,
         input_output_ids=input_output_ids,
         input_output_mask=input_output_mask,
+        output_log_probs=log_probs,
         output_mask=output_mask,
         ref_log_probs=log_probs,
-        old_log_probs=log_probs,
         scores=scores,
     )
     ray.get(actor.update.remote(loss_ref))
@@ -252,9 +263,9 @@ def test_grpo_dispatcher():
         num_generations=2,
         input_output_ids=input_output_ids,
         input_output_mask=input_output_mask,
+        output_log_probs=log_probs,
         output_mask=output_mask,
         ref_log_probs=log_probs,
-        old_log_probs=log_probs,
         scores=scores,
         batch_size=2,
     )

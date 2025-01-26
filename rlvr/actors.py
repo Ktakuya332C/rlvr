@@ -3,6 +3,7 @@ import ray
 import torch
 import warnings
 import numpy as np
+from scipy.special import log_softmax
 from ray.util import ActorPool
 from torch.nn import functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -52,7 +53,7 @@ class RolloutWorker(TorchDistActor):
         super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
 
-    @ray.method(num_returns=3)
+    @ray.method(num_returns=4)
     def process(
         self,
         input_ids,
@@ -67,28 +68,33 @@ class RolloutWorker(TorchDistActor):
             warnings.simplefilter("ignore", UserWarning)
             input_ids_torch = torch.from_numpy(input_ids)
             attention_mask_torch = torch.from_numpy(attention_mask)
-        input_outputs = self._model.generate(
+        results = self._model.generate(
             input_ids=input_ids_torch,
             attention_mask=attention_mask_torch,
             max_length=max_length,
             do_sample=do_sample,
             temperature=temperature,
             num_return_sequences=num_return_sequences,
+            return_dict_in_generate=True,
+            output_logits=True,
+            return_legacy_cache=False,
         )
+        input_outputs = results["sequences"].numpy()
         attention_mask = attention_mask.repeat(num_return_sequences, axis=0)
-        input_output_mask, output_mask = _rollout_postprocess(
-            input_outputs=input_outputs.numpy(),
+        input_output_mask, output_mask, output_log_probs = _rollout_postprocess(
+            input_outputs=input_outputs,
             input_mask=attention_mask,
+            output_logits=torch.stack(results["logits"], axis=1).numpy(),
             eos_token_id=self._model.config.eos_token_id,
         )
-        return input_outputs, input_output_mask, output_mask
+        return input_outputs, input_output_mask, output_mask, output_log_probs
 
     def sync(self, src_rank, group_name):
         for param in self._model.parameters():
             self._broadcast(param.data, src_rank, group_name)
 
 
-def _rollout_postprocess(input_outputs, input_mask, eos_token_id):
+def _rollout_postprocess(input_outputs, output_logits, input_mask, eos_token_id):
     input_output_eos_mask = (input_outputs == eos_token_id).astype(np.int64)
     input_output_eos_mask[:, : input_mask.shape[1]] *= 1 - input_mask
     input_output_mask = (
@@ -97,7 +103,18 @@ def _rollout_postprocess(input_outputs, input_mask, eos_token_id):
     input_output_mask[:, : input_mask.shape[1]] = input_mask
     output_mask = input_output_mask.copy()
     output_mask[:, : input_mask.shape[1]] = 0
-    return input_output_mask, output_mask
+
+    output_softmax = log_softmax(output_logits, axis=-1)
+    output_ids = input_outputs[:, input_mask.shape[1] :]
+    output_log_probs = np.take_along_axis(
+        arr=output_softmax,
+        indices=np.expand_dims(output_ids, -1),
+        axis=-1,
+    ).squeeze(-1)
+    output_log_probs_padded = np.zeros(output_mask.shape)
+    output_log_probs_padded[:, input_mask.shape[1] - 1 : -1] = output_log_probs
+
+    return input_output_mask, output_mask, output_log_probs_padded
 
 
 @ray.remote
@@ -106,7 +123,7 @@ class RolloutDispatcher:
     def __init__(self, rollout_workers):
         self._pool = ActorPool(rollout_workers)
 
-    @ray.method(num_returns=3)
+    @ray.method(num_returns=4)
     def process(
         self,
         input_ids,
@@ -137,14 +154,22 @@ class RolloutDispatcher:
         input_outputs_list = []
         input_output_mask_list = []
         output_mask_list = []
-        for input_outputs, input_output_mask, output_mask in self._pool.map(fn, args):
+        output_log_probs_list = []
+        for (
+            input_outputs,
+            input_output_mask,
+            output_mask,
+            output_log_probs,
+        ) in self._pool.map(fn, args):
             input_outputs_list.append(input_outputs)
             input_output_mask_list.append(input_output_mask)
             output_mask_list.append(output_mask_list)
+            output_log_probs_list.append(output_log_probs)
         return (
             np.concatenate(input_outputs_list),
             np.concatenate(input_output_mask_list),
             np.concatenate(input_output_mask_list),
+            np.concatenate(output_log_probs_list),
         )
 
 
@@ -242,8 +267,8 @@ class GRPOLearner(TorchDistActor):
         input_output_ids,
         input_output_mask,
         output_mask,
+        output_log_probs,
         ref_log_probs,
-        old_log_probs,
         scores,
         ratios_clip_eps=0.2,
         scores_std_eps=1e-4,
@@ -251,8 +276,8 @@ class GRPOLearner(TorchDistActor):
     ):
         assert len(input_output_ids) == len(input_output_mask)
         assert len(input_output_ids) == len(output_mask)
+        assert len(input_output_ids) == len(output_log_probs)
         assert len(input_output_ids) == len(ref_log_probs)
-        assert len(input_output_ids) == len(old_log_probs)
         assert len(input_output_ids) == len(scores)
         assert len(input_output_ids) % num_generations == 0
         with warnings.catch_warnings():
@@ -260,8 +285,8 @@ class GRPOLearner(TorchDistActor):
             input_output_ids_torch = torch.from_numpy(input_output_ids)
             input_output_mask_torch = torch.from_numpy(input_output_mask)
             output_mask_torch = torch.from_numpy(output_mask)
+            output_log_probs_torch = torch.from_numpy(output_log_probs)
             ref_log_probs_torch = torch.from_numpy(ref_log_probs)
-            old_log_probs_torch = torch.from_numpy(old_log_probs)
             scores_torch = torch.from_numpy(scores)
 
         # policy forward pass
@@ -280,8 +305,8 @@ class GRPOLearner(TorchDistActor):
         policy_loss, kl_loss = _grpo_loss(
             num_generations=num_generations,
             log_probs=log_probs_torch,
-            old_log_probs=old_log_probs_torch,
             ref_log_probs=ref_log_probs_torch,
+            output_log_probs=output_log_probs_torch,
             output_mask=output_mask_torch,
             scores=scores_torch,
             ratios_clip_eps=ratios_clip_eps,
@@ -304,8 +329,8 @@ class GRPOLearner(TorchDistActor):
 def _grpo_loss(
     num_generations,
     log_probs,
-    old_log_probs,
     ref_log_probs,
+    output_log_probs,
     output_mask,
     scores,
     ratios_clip_eps,
@@ -325,7 +350,7 @@ def _grpo_loss(
     advantages = (scores - means) / (stds + scores_std_eps)
 
     # policy loss
-    ratios = torch.exp(log_probs - old_log_probs)
+    ratios = torch.exp(log_probs - output_log_probs)
     clipped_ratios = torch.clamp(
         input=ratios,
         min=1 - ratios_clip_eps,
@@ -366,8 +391,8 @@ class GRPODispatcher:
         input_output_ids,
         input_output_mask,
         output_mask,
+        output_log_probs,
         ref_log_probs,
-        old_log_probs,
         scores,
         ratios_clip_eps=0.2,
         scores_std_eps=1e-4,
@@ -376,8 +401,8 @@ class GRPODispatcher:
     ):
         assert len(input_output_ids) == len(input_output_mask)
         assert len(input_output_ids) == len(output_mask)
+        assert len(input_output_ids) == len(output_log_probs)
         assert len(input_output_ids) == len(ref_log_probs)
-        assert len(input_output_ids) == len(old_log_probs)
         assert len(input_output_ids) == len(scores)
         assert len(input_output_ids) == batch_size * self._num_learners
         assert batch_size % num_generations == 0
@@ -390,8 +415,8 @@ class GRPODispatcher:
                 input_output_ids=input_output_ids[bgn : bgn + batch_size],
                 input_output_mask=input_output_mask[bgn : bgn + batch_size],
                 output_mask=output_mask[bgn : bgn + batch_size],
+                output_log_probs=output_log_probs[bgn : bgn + batch_size],
                 ref_log_probs=ref_log_probs[bgn : bgn + batch_size],
-                old_log_probs=old_log_probs[bgn : bgn + batch_size],
                 scores=scores[bgn : bgn + batch_size],
                 ratios_clip_eps=ratios_clip_eps,
                 scores_std_eps=scores_std_eps,

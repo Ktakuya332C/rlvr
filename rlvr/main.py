@@ -26,16 +26,14 @@ def main():
     scorer = LastIntScorer.remote()
     ref_workers = [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
     ref_dispatcher = ReferenceDispatcher.remote(ref_workers)
-    old_workers = [ReferenceWorker.remote("sbintuitions/tiny-lm") for _ in range(2)]
-    old_dispatcher = ReferenceDispatcher.remote(old_workers)
     grpo_workers = [GRPOLearner.remote("sbintuitions/tiny-lm") for _ in range(2)]
     grpo_dispatcher = GRPODispatcher.remote(grpo_workers)
 
-    global_dist_group = grpo_workers + old_workers + rollout_workers
+    global_dist_group = grpo_workers + rollout_workers
     host, port = ray.get(global_dist_group[0].get_addr.remote())
     for rank, worker in enumerate(global_dist_group):
         worker.init_process_group.remote(host, port, len(global_dist_group), rank)
-    weight_share_group = [grpo_workers[0]] + old_workers + rollout_workers
+    weight_share_group = [grpo_workers[0]] + rollout_workers
     weight_share_ranks = ray.get([w.get_rank.remote() for w in weight_share_group])
     for rank, worker in enumerate(weight_share_group):
         worker.new_group.remote(weight_share_ranks, group_name="weight-share")
@@ -51,16 +49,19 @@ def main():
                     texts=questions,
                     apply_chat_template=False,
                 )
-                input_outputs_ref, input_output_mask_ref, output_mask_ref = (
-                    rollout_dispatcher.process.remote(
-                        input_ids=input_ids_ref,
-                        attention_mask=attention_mask_ref,
-                        batch_size=2,
-                        max_length=512,
-                        do_sample=True,
-                        temperature=1.0,
-                        num_return_sequences=2,
-                    )
+                (
+                    input_outputs_ref,
+                    input_output_mask_ref,
+                    output_mask_ref,
+                    output_log_probs_ref,
+                ) = rollout_dispatcher.process.remote(
+                    input_ids=input_ids_ref,
+                    attention_mask=attention_mask_ref,
+                    batch_size=2,
+                    max_length=512,
+                    do_sample=True,
+                    temperature=1.0,
+                    num_return_sequences=2,
                 )
                 output_texts_ref = detokenizer.process.remote(
                     tokens=input_outputs_ref,
@@ -76,18 +77,13 @@ def main():
                     input_output_mask=input_output_mask_ref,
                     batch_size=2,
                 )
-                old_log_probs_ref = old_dispatcher.process.remote(
-                    input_output_ids=input_outputs_ref,
-                    input_output_mask=input_output_mask_ref,
-                    batch_size=2,
-                )
                 loss_ref = grpo_dispatcher.process.remote(
                     num_generations=2,
                     input_output_ids=input_outputs_ref,
                     input_output_mask=input_output_mask_ref,
+                    output_log_probs=output_log_probs_ref,
                     output_mask=output_mask_ref,
                     ref_log_probs=ref_log_probs_ref,
-                    old_log_probs=old_log_probs_ref,
                     scores=scores_ref,
                     batch_size=6,
                 )
