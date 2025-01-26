@@ -10,13 +10,15 @@ from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from rlvr.dist import TorchDistActor
+from rlvr.loggers import NoLogger
 
 
 @ray.remote
 class Tokenizer:
 
-    def __init__(self, tokenizer_path, padding_side="left"):
+    def __init__(self, tokenizer_path, padding_side="left", logger=None):
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        self._logger = logger if logger else NoLogger.remote()
 
     @ray.method(num_returns=2)
     def process(self, texts, max_length, padding_side="left", apply_chat_template=True):
@@ -33,6 +35,7 @@ class Tokenizer:
             attention_mask = (input_ids != self._tokenizer.pad_token_id).astype(
                 np.int64
             )
+            self._logger.store.remote("input_length", input_ids.shape[1])
             return input_ids, attention_mask
         inputs = self._tokenizer(
             texts.tolist(),
@@ -41,10 +44,8 @@ class Tokenizer:
             truncation=True,
             max_length=max_length,
         )
+        self._logger.store.remote("input_length", inputs["input_ids"].shape[1])
         return inputs["input_ids"], inputs["attention_mask"]
-
-    def get_metrics(self):
-        return self._metrics.get_metrics()
 
 
 @ray.remote
@@ -63,9 +64,10 @@ class DeTokenizer:
 @ray.remote
 class RolloutWorker(TorchDistActor):
 
-    def __init__(self, model_path):
+    def __init__(self, model_path, logger=None):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
         super().__init__(self._model)
+        self._logger = logger if logger else NoLogger.remote()
 
     @ray.method(num_returns=4)
     def process(
@@ -101,6 +103,7 @@ class RolloutWorker(TorchDistActor):
             output_logits=torch.stack(results["logits"], axis=1).numpy(),
             eos_token_id=self._model.config.eos_token_id,
         )
+        self._logger.store.remote("input_output_length", input_outputs.shape[1])
         return input_outputs, input_output_mask, output_mask, output_log_probs
 
 
@@ -193,6 +196,9 @@ class Replicator:
 @ray.remote
 class LastIntScorer:
 
+    def __init__(self, logger=None):
+        self._logger = logger if logger else NoLogger.remote()
+
     def process(self, responses, answers):
         assert len(responses) == len(answers)
         scores = np.zeros(len(responses))
@@ -200,6 +206,7 @@ class LastIntScorer:
             m = re.findall(r"\d+", response)
             if m and m[-1] != "" and m[-1] == answer:
                 scores[idx] = 1.0
+        self._logger.store_list.remote("scores", scores)
         return scores
 
 
@@ -262,13 +269,14 @@ class ReferenceDispatcher:
 @ray.remote
 class GRPOLearner(TorchDistActor):
 
-    def __init__(self, model_path, learning_rate=1e-6):
+    def __init__(self, model_path, learning_rate=1e-6, logger=None):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
         super().__init__(self._model)
         self._optimizer = torch.optim.AdamW(
             params=self._model.parameters(),
             lr=learning_rate,
         )
+        self._logger = logger if logger else NoLogger.remote()
 
     def distribute(self, group_name):
         assert group_name in self._groups
@@ -330,6 +338,9 @@ class GRPOLearner(TorchDistActor):
         loss = policy_loss + kl_loss_coef * kl_loss
         loss.backward()
 
+        self._logger.store.remote("policy_loss", policy_loss.item())
+        self._logger.store.remote("kl_loss", kl_loss.item())
+        self._logger.store.remote("loss", loss.item())
         return loss.item()
 
     def update(self, loss_):

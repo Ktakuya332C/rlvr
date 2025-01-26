@@ -18,6 +18,7 @@ from rlvr.actors import (
     GRPOLearner,
     GRPODispatcher,
 )
+from rlvr.loggers import StdoutLogger, TensorboardLogger
 
 
 def get_args(argv):
@@ -60,6 +61,10 @@ def main(argv):
     args = get_args(argv)
     ray.init()
 
+    # Initialize logger
+    logger = StdoutLogger.remote()
+
+    # Initialize placement group
     num_workers = (
         args.num_rollout_workers + args.num_reference_workers + args.num_grpo_learners
     )
@@ -69,7 +74,7 @@ def main(argv):
 
     # Initialize workers
     rollout_workers = [
-        RolloutWorker.options(scheduling_strategy=st).remote(args.model)
+        RolloutWorker.options(scheduling_strategy=st).remote(args.model, logger=logger)
         for _ in range(args.num_rollout_workers)
     ]
     ref_workers = [
@@ -78,7 +83,9 @@ def main(argv):
     ]
     grpo_workers = [
         GRPOLearner.options(scheduling_strategy=st).remote(
-            args.model, learning_rate=args.learning_rate
+            args.model,
+            learning_rate=args.learning_rate,
+            logger=logger,
         )
         for _ in range(args.num_grpo_learners)
     ]
@@ -102,17 +109,19 @@ def main(argv):
         worker.distribute.remote(group_name=args.ddp_group)
 
     # Initialize actors
-    tokenizer = Tokenizer.remote(args.model)
+    tokenizer = Tokenizer.remote(args.model, logger=logger)
     rollout_dispatcher = RolloutDispatcher.remote(rollout_workers)
     detokenizer = DeTokenizer.remote(args.model)
     replicator = Replicator.remote()
-    scorer = LastIntScorer.remote()
+    scorer = LastIntScorer.remote(logger=logger)
     ref_dispatcher = ReferenceDispatcher.remote(ref_workers)
     grpo_dispatcher = GRPODispatcher.remote(grpo_workers)
 
     # Main loop
     dataloader = get_gsm8k()
-    for batch in dataloader.iter_batches(batch_size=args.batch_size_sync):
+    for step, batch in enumerate(
+        dataloader.iter_batches(batch_size=args.batch_size_sync)
+    ):
         loss_refs = []
         for bgn_update in range(0, args.batch_size_sync, args.batch_size_update):
             for bgn_backward in range(
@@ -186,12 +195,16 @@ def main(argv):
 
             grpo_dispatcher.update.remote(loss_ref)
 
-        losses = ray.get(loss_refs)
-        print("loss =", np.concatenate(losses).mean())
+        ray.get(loss_refs)
+        ray.get(logger.log.remote(step))
 
-        src_rank = ray.get(grpo_workers[0].get_rank.remote())
-        for worker in weight_share_group:
-            worker.sync.remote(src_rank, args.weight_share_group)
+        src_rank = grpo_workers[0].get_rank.remote()
+        ray.get(
+            [
+                worker.sync.remote(src_rank, args.weight_share_group)
+                for worker in weight_share_group
+            ]
+        )
 
     ray.shutdown()
 
