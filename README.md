@@ -30,3 +30,11 @@ $ poetry run pytest -xsvv tests
 ## Note
 - You may need to set `GLOO_SOCKET_IFNAME=lo0` to run this script on Mac.
 - This design is largely influenced by [RLlib Flow](https://arxiv.org/abs/2011.12719).
+
+## ToDo
+- missing eos penalty
+- bf16 (numpy does not support bf16) 
+- FSDP (DDP works without GPUs, but FSDP does not)
+- vllm integration (`collective_rpc` support is not yet released)
+- large scale experiments
+- tensor parallel
