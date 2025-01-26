@@ -6,6 +6,7 @@ A simple toy implementation of GRPO with LLMs.
 $ git clone https://github.com/Ktakuya332C/simple-rlvr.git
 $ cd simple-rlvr
 $ poetry install
+$ # Below command will run, but scores won't go up because the scale is too small
 $ poetry run python -m rlvr.main \
   --model=sbintuitions/tiny-lm-chat \
   --num-rollout-workers=2 \
