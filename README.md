@@ -1,5 +1,5 @@
 # simple-rlvr
-A simple implementation of reinforcement learning with verifiable rewards.
+A simple toy implementation of reinforcement learning with verifiable rewards.
 
 ## Usage
 ```bash
