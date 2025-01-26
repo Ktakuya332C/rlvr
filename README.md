@@ -1,5 +1,5 @@
 # simple-rlvr
-A simple toy implementation of reinforcement learning with verifiable rewards.
+A simple toy implementation of GRPO with LLMs.
 
 ## Usage
 ```bash
@@ -29,3 +29,4 @@ $ poetry run pytest -xsvv tests
 
 ## Note
 - You may need to set `GLOO_SOCKET_IFNAME=lo0` to run this script on Mac.
+- This design is largely influenced by [RLlib Flow](https://arxiv.org/abs/2011.12719).
