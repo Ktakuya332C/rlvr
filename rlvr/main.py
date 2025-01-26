@@ -33,10 +33,16 @@ def main():
     host, port = ray.get(global_dist_group[0].get_addr.remote())
     for rank, worker in enumerate(global_dist_group):
         worker.init_process_group.remote(host, port, len(global_dist_group), rank)
+
     weight_share_group = [grpo_workers[0]] + rollout_workers
     weight_share_ranks = ray.get([w.get_rank.remote() for w in weight_share_group])
     for rank, worker in enumerate(weight_share_group):
         worker.new_group.remote(weight_share_ranks, group_name="weight-share")
+
+    ddp_ranks = ray.get([w.get_rank.remote() for w in grpo_workers])
+    for rank, worker in enumerate(grpo_workers):
+        worker.new_group.remote(ddp_ranks, group_name="ddp")
+        worker.distribute.remote(group_name="ddp")
 
     dataloader = get_gsm8k()
     for batch in dataloader.iter_batches(batch_size=24):

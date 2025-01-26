@@ -26,7 +26,7 @@ class TorchDistActor:
         return torch.distributed.get_rank(group)
 
     def new_group(self, ranks, group_name):
-        group = torch.distributed.new_group(ranks)
+        group = torch.distributed.new_group(ranks, use_local_synchronization=True)
         self._groups[group_name] = group
 
     def _broadcast(self, tensor, src_rank, group_name=None):

@@ -3,9 +3,10 @@ import ray
 import torch
 import warnings
 import numpy as np
-from scipy.special import log_softmax
 from ray.util import ActorPool
 from torch.nn import functional as F
+from scipy.special import log_softmax
+from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from rlvr.dist import TorchDistActor
@@ -247,11 +248,16 @@ class GRPOLearner(TorchDistActor):
 
     def __init__(self, model_path, learning_rate=1e-6):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
+        super().__init__(self._model)
         self._optimizer = torch.optim.AdamW(
             params=self._model.parameters(),
             lr=learning_rate,
         )
-        super().__init__(self._model)
+
+    def distribute(self, group_name):
+        assert group_name in self._groups
+        pg = self._groups[group_name]
+        self._model = DistributedDataParallel(self._model, process_group=pg)
 
     def process(
         self,
