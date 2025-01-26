@@ -17,7 +17,7 @@ def test_tokenize():
     actor = actors.Tokenizer.remote("sbintuitions/tiny-lm-chat")
 
     texts = np.array(["This is a pen", "That is also a pen"])
-    ref = actor.process.remote(texts, apply_chat_template=False)
+    ref = actor.process.remote(texts, max_length=512, apply_chat_template=False)
     input_ids, attention_mask = ray.get(ref)
     expected_input_ids = np.array(
         [[3, 489, 310, 287, 8926, 2], [3252, 310, 354, 287, 8926, 2]]
@@ -27,7 +27,7 @@ def test_tokenize():
     np.testing.assert_equal(attention_mask, expected_attention_mask)
 
     texts = np.array(["Hi!", "Hello?"])
-    ref = actor.process.remote(texts, apply_chat_template=True)
+    ref = actor.process.remote(texts, max_length=512, apply_chat_template=True)
     input_ids, attention_mask = ray.get(ref)
     expected_input_ids = np.array(
         [[3, 51202, 7182, 749, 2], [51202, 271, 28498, 1690, 2]]

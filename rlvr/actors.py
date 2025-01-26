@@ -19,18 +19,18 @@ class Tokenizer:
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     @ray.method(num_returns=2)
-    def process(self, texts, padding_side="left", apply_chat_template=True):
+    def process(self, texts, max_length, padding_side="left", apply_chat_template=True):
         self._tokenizer.padding_side = padding_side
         if apply_chat_template:
             texts = [[{"role": "user", "content": t}] for t in texts.tolist()]
             input_ids = self._tokenizer.apply_chat_template(
-                texts, return_tensors="np", padding=True
+                texts, return_tensors="np", padding=True, truncation=True, max_length=max_length,
             )
             attention_mask = (input_ids != self._tokenizer.pad_token_id).astype(
                 np.int64
             )
             return input_ids, attention_mask
-        inputs = self._tokenizer(texts.tolist(), return_tensors="np", padding=True)
+        inputs = self._tokenizer(texts.tolist(), return_tensors="np", padding=True, truncation=True, max_length=max_length)
         return inputs["input_ids"], inputs["attention_mask"]
 
 
