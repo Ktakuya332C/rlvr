@@ -229,10 +229,10 @@ def test_grpo_dispatcher():
     _, port = ray.get(actor1.get_addr.remote())
     actor1.init_process_group.remote("localhost", port, 2, 0)
     actor2.init_process_group.remote("localhost", port, 2, 1)
-    gp_ref1 = actor1.new_group.remote([0, 1], group_name="local")
-    gp_ref2 = actor2.new_group.remote([0, 1], group_name="local")
-    actor1.distribute.remote(group_name=gp_ref1)
-    actor2.distribute.remote(group_name=gp_ref2)
+    actor1.new_group.remote([0, 1], group_name="local")
+    actor2.new_group.remote([0, 1], group_name="local")
+    actor1.distribute.remote(group_name="local")
+    actor2.distribute.remote(group_name="local")
 
     input_output_ids = np.array(
         [
@@ -278,5 +278,6 @@ def test_grpo_dispatcher():
         batch_size=2,
     )
     actor.update.remote(loss_ref)
-    actor1.sync.remote(0, group_name="local")
-    actor2.sync.remote(0, group_name="local")
+    done1 = actor1.sync.remote(0, group_name="local")
+    done2 = actor2.sync.remote(0, group_name="local")
+    ray.get([done1, done2])

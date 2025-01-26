@@ -22,6 +22,7 @@ class TorchDistActor:
         os.environ["MASTER_PORT"] = str(master_port)
         torch.distributed.init_process_group(backend, world_size=world_size, rank=rank)
         self._groups[None] = None
+        return True
 
     def get_rank(self, group_name=None):
         group = self._groups[group_name]
@@ -30,13 +31,16 @@ class TorchDistActor:
     def new_group(self, ranks, group_name):
         group = torch.distributed.new_group(ranks, use_local_synchronization=True)
         self._groups[group_name] = group
+        return True
 
     def _broadcast(self, tensor, src_rank, group_name=None):
         group = self._groups[group_name]
         rank = torch.distributed.get_rank(group)
         torch.distributed.broadcast(tensor, src_rank, group)
+        return True
 
     def sync(self, src_rank, group_name):
         assert self._model is not None
         for param in self._model.parameters():
             self._broadcast(param.data, src_rank, group_name)
+        return True

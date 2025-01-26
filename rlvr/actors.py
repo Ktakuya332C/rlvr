@@ -33,7 +33,6 @@ class Tokenizer:
             attention_mask = (input_ids != self._tokenizer.pad_token_id).astype(
                 np.int64
             )
-            self._metrics.register("input_length", input_ids.shape[1])
             return input_ids, attention_mask
         inputs = self._tokenizer(
             texts.tolist(),

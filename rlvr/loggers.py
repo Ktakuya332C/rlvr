@@ -13,7 +13,20 @@ class BaseLogger:
 
 
 @ray.remote
+class NoLogger(BaseLogger):
+
+    def __init__(self):
+        super().__init__()
+
+    def log(self):
+        return True
+
+
+@ray.remote
 class StdoutLogger(BaseLogger):
+
+    def __init__(self):
+        super().__init__()
 
     def log(self):
         for (step, key), value_list in self._metrics.items():
