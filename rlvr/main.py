@@ -87,7 +87,9 @@ def main(argv):
     global_dist_group = grpo_workers + rollout_workers
     host, port = ray.get(global_dist_group[0].get_addr.remote())
     for rank, worker in enumerate(global_dist_group):
-        worker.init_process_group.remote(host, port, len(global_dist_group), rank, args.backend)
+        worker.init_process_group.remote(
+            host, port, len(global_dist_group), rank, args.backend
+        )
 
     weight_share_group = [grpo_workers[0]] + rollout_workers
     weight_share_ranks = ray.get([w.get_rank.remote() for w in weight_share_group])

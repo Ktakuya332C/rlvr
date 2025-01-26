@@ -10,6 +10,7 @@ from torch.nn.parallel import DistributedDataParallel
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from rlvr.dist import TorchDistActor
+from rlvr.loggers import MetricsCollector
 
 
 @ray.remote
@@ -17,6 +18,7 @@ class Tokenizer:
 
     def __init__(self, tokenizer_path, padding_side="left"):
         self._tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
+        self._metrics = MetricsCollector()
 
     @ray.method(num_returns=2)
     def process(self, texts, max_length, padding_side="left", apply_chat_template=True):
@@ -24,14 +26,29 @@ class Tokenizer:
         if apply_chat_template:
             texts = [[{"role": "user", "content": t}] for t in texts.tolist()]
             input_ids = self._tokenizer.apply_chat_template(
-                texts, return_tensors="np", padding=True, truncation=True, max_length=max_length,
+                texts,
+                return_tensors="np",
+                padding=True,
+                truncation=True,
+                max_length=max_length,
             )
             attention_mask = (input_ids != self._tokenizer.pad_token_id).astype(
                 np.int64
             )
+            self._metrics.register("input_length", input_ids.shape[1])
             return input_ids, attention_mask
-        inputs = self._tokenizer(texts.tolist(), return_tensors="np", padding=True, truncation=True, max_length=max_length)
+        inputs = self._tokenizer(
+            texts.tolist(),
+            return_tensors="np",
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+        )
+        self._metrics.register("input_length", inputs["input_ids"].shape[1])
         return inputs["input_ids"], inputs["attention_mask"]
+
+    def get_metrics(self):
+        return self._metrics.get_metrics()
 
 
 @ray.remote
@@ -53,6 +70,7 @@ class RolloutWorker(TorchDistActor):
     def __init__(self, model_path):
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
         super().__init__(self._model)
+        self._metrics = MetricsCollector()
 
     @ray.method(num_returns=4)
     def process(
@@ -88,7 +106,12 @@ class RolloutWorker(TorchDistActor):
             output_logits=torch.stack(results["logits"], axis=1).numpy(),
             eos_token_id=self._model.config.eos_token_id,
         )
+        self._metrics.register("input_output_length", input_outputs.shape[1])
+        self._metrics.register("output_length", len(results["logits"]))
         return input_outputs, input_output_mask, output_mask, output_log_probs
+
+    def get_metrics(self):
+        return self._metrics.get_metrics()
 
 
 def _rollout_postprocess(input_outputs, output_logits, input_mask, eos_token_id):

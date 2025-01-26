@@ -15,7 +15,9 @@ class TorchDistActor:
         host, port = s.getsockname()
         return host, port
 
-    def init_process_group(self, master_host, master_port, world_size, rank, backend="gloo"):
+    def init_process_group(
+        self, master_host, master_port, world_size, rank, backend="gloo"
+    ):
         os.environ["MASTER_ADDR"] = master_host
         os.environ["MASTER_PORT"] = str(master_port)
         torch.distributed.init_process_group(backend, world_size=world_size, rank=rank)
