@@ -5,8 +5,9 @@ import socket
 
 class TorchDistActor:
 
-    def __init__(self):
+    def __init__(self, model=None):
         self._groups = {}
+        self._model = model
 
     def get_addr(self):
         s = socket.socket()
@@ -32,3 +33,8 @@ class TorchDistActor:
         group = self._groups[group_name]
         rank = torch.distributed.get_rank(group)
         torch.distributed.broadcast(tensor, src_rank, group)
+
+    def sync(self, src_rank, group_name):
+        assert self._model is not None
+        for param in self._model.parameters():
+            self._broadcast(param.data, src_rank, group_name)

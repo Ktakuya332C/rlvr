@@ -50,8 +50,8 @@ class DeTokenizer:
 class RolloutWorker(TorchDistActor):
 
     def __init__(self, model_path):
-        super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
+        super().__init__(self._model)
 
     @ray.method(num_returns=4)
     def process(
@@ -88,10 +88,6 @@ class RolloutWorker(TorchDistActor):
             eos_token_id=self._model.config.eos_token_id,
         )
         return input_outputs, input_output_mask, output_mask, output_log_probs
-
-    def sync(self, src_rank, group_name):
-        for param in self._model.parameters():
-            self._broadcast(param.data, src_rank, group_name)
 
 
 def _rollout_postprocess(input_outputs, output_logits, input_mask, eos_token_id):
@@ -197,8 +193,8 @@ class LastIntScorer:
 class ReferenceWorker(TorchDistActor):
 
     def __init__(self, model_path):
-        super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
+        super().__init__(self._model)
 
     def process(
         self,
@@ -221,10 +217,6 @@ class ReferenceWorker(TorchDistActor):
             index=input_output_ids_torch.unsqueeze(-1),
         ).squeeze(-1)
         return ref_log_probs.numpy()
-
-    def sync(self, src_rank, group_name):
-        for param in self._model.parameters():
-            self._broadcast(param.data, src_rank, group_name)
 
 
 @ray.remote
@@ -254,12 +246,12 @@ class ReferenceDispatcher:
 class GRPOLearner(TorchDistActor):
 
     def __init__(self, model_path, learning_rate=1e-6):
-        super().__init__()
         self._model = AutoModelForCausalLM.from_pretrained(model_path)
         self._optimizer = torch.optim.AdamW(
             params=self._model.parameters(),
             lr=learning_rate,
         )
+        super().__init__(self._model)
 
     def process(
         self,
@@ -320,10 +312,6 @@ class GRPOLearner(TorchDistActor):
     def update(self, loss_):
         self._optimizer.step()
         self._optimizer.zero_grad()
-
-    def sync(self, src_rank, group_name):
-        for param in self._model.parameters():
-            self._broadcast(param.data, src_rank, group_name)
 
 
 def _grpo_loss(

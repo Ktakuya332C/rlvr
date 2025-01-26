@@ -2,6 +2,7 @@ import os
 import ray
 import time
 import torch
+import numpy as np
 from ray.util.placement_group import placement_group
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
@@ -19,10 +20,11 @@ def test_getaddr():
 
 class SampleActor(TorchDistActor):
 
-    def broadcast(self, number, src_rank, group_name=None):
-        tensor = torch.tensor(number)
-        self._broadcast(tensor, src_rank, group_name)
-        return tensor.item()
+    def __init__(self):
+        super().__init__(model=torch.nn.Linear(3, 4))
+
+    def get_weight(self):
+        return self._model.weight.data.numpy()
 
 
 def test_global_group():
@@ -41,14 +43,16 @@ def test_global_group():
     assert ray.get(actors[0].get_rank.remote()) == 0
     assert ray.get(actors[1].get_rank.remote()) == 1
 
+    for rank in range(2):
+        actors[rank].sync.remote(0, group_name=None)
+
     val0, val1 = ray.get(
         [
-            actors[0].broadcast.remote(0, 0),
-            actors[1].broadcast.remote(1, 0),
+            actors[0].get_weight.remote(),
+            actors[1].get_weight.remote(),
         ]
     )
-    assert val0 == 0
-    assert val1 == 0
+    np.testing.assert_equal(val0, val1)
 
 
 def test_local_group():
@@ -67,11 +71,13 @@ def test_local_group():
     for rank in range(4):
         actors[rank].new_group.remote(ranks=[0, 1], group_name="local")
 
+    for rank in range(2):
+        actors[rank].sync.remote(0, group_name="local")
+
     val0, val1 = ray.get(
         [
-            actors[0].broadcast.remote(0, 0, "local"),
-            actors[1].broadcast.remote(1, 0, "local"),
+            actors[0].get_weight.remote(),
+            actors[1].get_weight.remote(),
         ]
     )
-    assert val0 == 0
-    assert val1 == 0
+    np.testing.assert_equal(val0, val1)
