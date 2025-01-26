@@ -34,6 +34,7 @@ def get_args(argv):
     parser.add_argument("--num-generations", type=int)
     parser.add_argument("--max-length", type=int)
     parser.add_argument("--backend", type=str, default="gloo")
+    parser.add_argument("--apply-chat-template", type=bool, default=True)
     parser.add_argument("--learning-rate", type=float, default=1e-6)
     parser.add_argument("--ratios-clip-eps", type=float, default=0.2)
     parser.add_argument("--scores-std-eps", type=float, default=1e-4)
@@ -125,7 +126,7 @@ def main(argv):
                 # Rollout
                 input_ids_ref, attention_mask_ref = tokenizer.process.remote(
                     texts=questions,
-                    apply_chat_template=False,
+                    apply_chat_template=args.apply_chat_template,
                 )
                 (
                     input_outputs_ref,
