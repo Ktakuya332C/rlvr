@@ -201,6 +201,7 @@ class ReferenceWorker(TorchDistActor):
         self,
         input_output_ids,
         input_output_mask,
+        temperature=1.0,
     ):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
@@ -211,7 +212,7 @@ class ReferenceWorker(TorchDistActor):
                 input_ids=input_output_ids_torch,
                 attention_mask=input_output_mask_torch,
             )
-        log_probs = F.log_softmax(result.logits.detach(), dim=-1)
+        log_probs = F.log_softmax(result.logits.detach() / temperature, dim=-1)
         ref_log_probs = torch.gather(
             input=log_probs,
             dim=-1,
@@ -226,10 +227,12 @@ class ReferenceDispatcher:
     def __init__(self, reference_workers):
         self._pool = ActorPool(reference_workers)
 
-    def process(self, input_output_ids, input_output_mask, batch_size):
+    def process(
+        self, input_output_ids, input_output_mask, temperature=1.0, batch_size=1
+    ):
         assert len(input_output_ids) == len(input_output_mask)
         assert len(input_output_ids) % batch_size == 0
-        fn = lambda a, v: a.process.remote(v[0], v[1])
+        fn = lambda a, v: a.process.remote(v[0], v[1], temperature)
         args = []
         for bgn in range(0, len(input_output_ids), batch_size):
             arg = (
@@ -271,6 +274,7 @@ class GRPOLearner(TorchDistActor):
         ratios_clip_eps=0.2,
         scores_std_eps=1e-4,
         kl_loss_coef=0.05,
+        temperature=1.0,
     ):
         assert len(input_output_ids) == len(input_output_mask)
         assert len(input_output_ids) == len(output_mask)
@@ -292,7 +296,7 @@ class GRPOLearner(TorchDistActor):
             input_ids=input_output_ids_torch,
             attention_mask=input_output_mask_torch,
         )
-        log_softmax_torch = F.log_softmax(result.logits, dim=-1)
+        log_softmax_torch = F.log_softmax(result.logits / temperature, dim=-1)
         log_probs_torch = torch.gather(
             input=log_softmax_torch,
             dim=-1,
@@ -391,6 +395,7 @@ class GRPODispatcher:
         ratios_clip_eps=0.2,
         scores_std_eps=1e-4,
         kl_loss_coef=0.05,
+        temperature=1.0,
         batch_size=1,
     ):
         assert len(input_output_ids) == len(input_output_mask)
@@ -415,6 +420,7 @@ class GRPODispatcher:
                 ratios_clip_eps=ratios_clip_eps,
                 scores_std_eps=scores_std_eps,
                 kl_loss_coef=kl_loss_coef,
+                temperature=temperature,
             )
             args.append(kwargs)
         losses = np.empty(self._num_learners)

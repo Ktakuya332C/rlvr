@@ -131,6 +131,7 @@ def main(argv):
                 ref_log_probs_ref = ref_dispatcher.process.remote(
                     input_output_ids=input_outputs_ref,
                     input_output_mask=input_output_mask_ref,
+                    temperature=args.temperature,
                     batch_size=args.batch_size_reference,
                 )
                 loss_ref = grpo_dispatcher.process.remote(
@@ -141,6 +142,7 @@ def main(argv):
                     output_mask=output_mask_ref,
                     ref_log_probs=ref_log_probs_ref,
                     scores=scores_ref,
+                    temperature=args.temperature,
                     batch_size=args.batch_size_learner,
                 )
                 loss_refs.append(loss_ref)
